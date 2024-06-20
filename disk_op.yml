@@ -1,0 +1,90 @@
+---
+- name: Disk operations
+  hosts: disk
+  remote_user: root
+
+  tasks:
+    - name: Install lvm2 for Ubuntu distribution
+      apt:
+        name: lvm2
+        state: present
+      when: ansible_distribution == 'Ubuntu'
+    - name: Install lvm2 for CentOS distribution
+      yum:
+        name: lvm2
+        state: present
+      when: ansible_distribution == 'CentOS'
+    - name: Disk partition and mount
+      block:
+        # 测试
+        - name: Do partition
+          debug:
+            msg: "{{ item.device }}{{ item.index }}"
+          loop: "{{ DEVICES }}"
+        # 分区
+        - name: Do partition
+          community.general.parted:
+            label: gpt
+            number: 1
+            part_type: primary
+            flags: [lvm]
+            state: present
+            device: "{{ item.device }}"
+          loop: "{{ DEVICES }}"
+        # 创建 volume group
+        - name: Create volume group(physical volume auto created if necessary)
+          community.general.lvg:
+            state: present
+            vg: "vgdata{{ item.index }}"
+            # pvs: "{{ item.device }}"
+            pvs: "{{ item.device }}1"
+          loop: "{{ DEVICES }}"
+        # 创建 logical volume
+        - name: Create logical volume
+          community.general.lvol:
+            vg: "vgdata{{ item.index }}"
+            lv: "lvdata{{ item.index }}"
+            state: present
+            size: 100%VG
+          loop: "{{ DEVICES }}"
+        # 创建文件系统
+        - name: Create filesystem
+          community.general.filesystem:
+            fstype: ext4
+            dev: "/dev/vgdata{{ item.index }}/lvdata{{ item.index }}"
+          loop: "{{ DEVICES }}"
+        # 挂载
+        - name: Mount logical volume to /mnt/data_1
+          ansible.posix.mount:
+            path: "/mnt/data_{{ item.index }}"
+            src: "/dev/vgdata{{ item.index }}/lvdata{{ item.index }}"
+            fstype: ext4
+            state: mounted
+          loop: "{{ DEVICES }}"
+    # 创建目录
+    - name: Mkdir /mnt/data_1/data and /mnt/data_1/logs
+      with_items:
+        - data
+        - logs
+      file:
+        path: "/mnt/data_1/{{ item }}"
+        state: directory
+    - name: Mkdir /cy
+      file:
+        path: "/cy"
+        state: directory
+    - name: Create a symbolic link
+      file:
+        src: "/mnt/data_1/{{ item }}"
+        path: "/cy/{{ item }}"
+        force: yes
+        state: link
+      with_items:
+        - data
+        - logs
+    - name: df -h
+      shell: "df -h"
+      register: result
+    - name: show df -h info
+      ansible.builtin.debug:
+        msg: "{{ result.stdout_lines }}"
