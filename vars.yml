@@ -1,0 +1,3 @@
+DEVICES:
+  - device: /dev/vdb
+    index: 1
